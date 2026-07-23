@@ -17,6 +17,9 @@ your keyboard input with it. Push it back and control returns.
   back past the shared edge, it tells the server to take local control back.
 - `Ctrl+Alt+Esc` on the server's physical keyboard always forces control back
   to the server, in case the mouse can't reach the edge for some reason.
+- Both sides also poll their local clipboard twice a second; whichever one
+  changes first pushes its text content to the other, so copy/paste works
+  across the two machines regardless of which one currently has control.
 
 Only one client can be connected at a time, and the two screens are assumed
 to be arranged side-by-side (left/right), not stacked.
@@ -35,7 +38,9 @@ Platform notes:
   permission in System Settings → Privacy & Security, on both the server
   (to capture input) and client (to simulate it).
 - **Linux**: requires an X11 session (Xorg or XWayland). Plain Wayland
-  compositors generally block the global hooks pynput relies on.
+  compositors generally block the global hooks pynput relies on. Clipboard
+  sync needs a clipboard tool on the `PATH`: `xclip` or `xsel` for X11, or
+  `wl-clipboard` under Wayland.
 
 Open/forward the chosen TCP port (default `24800`) on the **server**
 machine's firewall so the client can reach it.
@@ -64,16 +69,19 @@ opposite edge.
 
 Full option list: `./deskflop.sh server --help` / `./deskflop.sh client --help`
 (`--port`, `--width`/`--height` to override auto-detected screen size if
-detection fails on a headless/multi-monitor setup).
+detection fails on a headless/multi-monitor setup, `--no-clipboard` to
+disable clipboard syncing on that machine).
 
 ## Security
 
 This is a small educational/utility tool, not a hardened product:
 
-- The connection is **plain, unencrypted TCP** — every keystroke (including
-  passwords you type) travels in the clear. `--password` is only a
-  shared-secret handshake to keep strangers on the LAN from connecting, it
-  does **not** encrypt traffic.
+- The connection is **plain, unencrypted TCP** — every keystroke and every
+  clipboard change (including things like passwords copied from a password
+  manager) travels in the clear. `--password` is only a shared-secret
+  handshake to keep strangers on the LAN from connecting, it does **not**
+  encrypt traffic. Use `--no-clipboard` on either side if you'd rather it
+  never leaves that machine.
 - Only run this on a trusted network, or tunnel it over SSH/VPN
   (e.g. `ssh -L 24800:localhost:24800 user@server` and connect the client to
   `--host 127.0.0.1`).
@@ -84,7 +92,9 @@ This is a small educational/utility tool, not a hardened product:
 
 - Two machines only, one direction of hand-off logic (left/right, not
   top/bottom).
-- No clipboard sharing, no drag-and-drop, no file transfer.
+- Clipboard sync is text-only (no images, files, or rich formatting), and is
+  polling-based (up to ~0.5s latency) rather than event-driven.
+- No drag-and-drop, no file transfer.
 - The server's local cursor will visibly snap/jitter while control is handed
   to the client — this is an artifact of the portable "recenter and measure
   deltas" technique used instead of OS-specific relative-mouse-capture APIs.

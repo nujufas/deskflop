@@ -23,7 +23,14 @@ import time
 
 from pynput import keyboard, mouse
 
+try:
+    import pyperclip
+    HAS_PYPERCLIP = True
+except ImportError:
+    HAS_PYPERCLIP = False
+
 DEFAULT_PORT = 24800
+CLIPBOARD_POLL_INTERVAL = 0.5
 
 BUTTON_NAMES = {mouse.Button.left: "left", mouse.Button.right: "right", mouse.Button.middle: "middle"}
 BUTTON_FROM_NAME = {v: k for k, v in BUTTON_NAMES.items()}
@@ -92,8 +99,46 @@ class Connection:
             pass
 
 
+class ClipboardSync:
+    """Polls the local clipboard for changes and forwards them to the peer;
+    applies clipboard content received from the peer without echoing it back."""
+
+    def __init__(self, send_func):
+        self.send_func = send_func
+        self.last_value = self._read()
+        self._stop = threading.Event()
+        self._thread = threading.Thread(target=self._poll_loop, daemon=True)
+
+    def start(self):
+        self._thread.start()
+
+    def stop(self):
+        self._stop.set()
+
+    @staticmethod
+    def _read():
+        try:
+            return pyperclip.paste()
+        except Exception:
+            return None
+
+    def _poll_loop(self):
+        while not self._stop.wait(CLIPBOARD_POLL_INTERVAL):
+            current = self._read()
+            if current is not None and current != self.last_value:
+                self.last_value = current
+                self.send_func(current)
+
+    def apply_remote(self, text):
+        self.last_value = text
+        try:
+            pyperclip.copy(text)
+        except Exception:
+            pass
+
+
 class Server:
-    def __init__(self, port, edge, password, width=None, height=None):
+    def __init__(self, port, edge, password, width=None, height=None, clipboard=True):
         self.port = port
         self.edge = edge  # which edge of THIS screen borders the client
         self.password = password
@@ -112,6 +157,12 @@ class Server:
 
         self.mouse_listener = None
         self.keyboard_listener = None
+
+        self.clipboard = None
+        if clipboard and HAS_PYPERCLIP:
+            self.clipboard = ClipboardSync(lambda text: self._safe_send({"t": "clipboard", "text": text}))
+        elif clipboard:
+            print("[deskflop] clipboard sync disabled: install 'pyperclip' to enable it")
 
     def edge_hit(self, x, y):
         return x >= self.width - 1 if self.edge == "right" else x <= 0
@@ -207,6 +258,8 @@ class Server:
         self._safe_send({"t": "key", "key": key_to_wire(key), "pressed": pressed})
 
     def _safe_send(self, obj):
+        if self.conn is None:
+            return
         try:
             self.conn.send(obj)
         except OSError:
@@ -220,8 +273,11 @@ class Server:
                 break
             if msg is None:
                 break
-            if msg.get("t") == "switch_back":
+            t = msg.get("t")
+            if t == "switch_back":
                 self.leave_capture()
+            elif t == "clipboard" and self.clipboard:
+                self.clipboard.apply_remote(msg.get("text", ""))
         self.conn.close()
         if self.captured:
             self.leave_capture()
@@ -238,6 +294,8 @@ class Server:
         if not self.password:
             print("[deskflop] WARNING: no --password set, anyone on the network can connect")
         self.start_normal_listener()
+        if self.clipboard:
+            self.clipboard.start()
         try:
             while True:
                 sock, addr = srv_sock.accept()
@@ -259,7 +317,7 @@ class Server:
 
 
 class Client:
-    def __init__(self, host, port, password, width=None, height=None):
+    def __init__(self, host, port, password, width=None, height=None, clipboard=True):
         self.host = host
         self.port = port
         self.password = password
@@ -271,6 +329,12 @@ class Client:
         self.width, self.height = size
         self.server_edge = "right"
         self.conn = None
+
+        self.clipboard = None
+        if clipboard and HAS_PYPERCLIP:
+            self.clipboard = ClipboardSync(lambda text: self._safe_send({"t": "clipboard", "text": text}))
+        elif clipboard:
+            print("[deskflop] clipboard sync disabled: install 'pyperclip' to enable it")
 
     def connect(self):
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -285,6 +349,8 @@ class Client:
         print(f"[deskflop] connected to server {self.host}:{self.port}")
 
     def run(self):
+        if self.clipboard:
+            self.clipboard.start()
         while True:
             try:
                 self.connect()
@@ -338,8 +404,12 @@ class Client:
                 self.keyboard_controller.press(key)
             else:
                 self.keyboard_controller.release(key)
+        elif t == "clipboard" and self.clipboard:
+            self.clipboard.apply_remote(msg.get("text", ""))
 
     def _safe_send(self, obj):
+        if self.conn is None:
+            return
         try:
             self.conn.send(obj)
         except OSError:
@@ -357,6 +427,7 @@ def main():
     srv.add_argument("--password", default="", help="shared secret, must match the client")
     srv.add_argument("--width", type=int, default=None, help="override auto-detected screen width")
     srv.add_argument("--height", type=int, default=None, help="override auto-detected screen height")
+    srv.add_argument("--no-clipboard", action="store_true", help="disable clipboard sync")
 
     cli = sub.add_parser("client", help="run as the client (receives keyboard/mouse events)")
     cli.add_argument("--host", required=True, help="server hostname or IP")
@@ -364,13 +435,14 @@ def main():
     cli.add_argument("--password", default="", help="shared secret, must match the server")
     cli.add_argument("--width", type=int, default=None, help="override auto-detected screen width")
     cli.add_argument("--height", type=int, default=None, help="override auto-detected screen height")
+    cli.add_argument("--no-clipboard", action="store_true", help="disable clipboard sync")
 
     args = parser.parse_args()
 
     if args.mode == "server":
-        Server(args.port, args.edge, args.password, args.width, args.height).run()
+        Server(args.port, args.edge, args.password, args.width, args.height, not args.no_clipboard).run()
     else:
-        Client(args.host, args.port, args.password, args.width, args.height).run()
+        Client(args.host, args.port, args.password, args.width, args.height, not args.no_clipboard).run()
 
 
 if __name__ == "__main__":
