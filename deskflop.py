@@ -317,7 +317,7 @@ class Server:
 
 
 class Client:
-    def __init__(self, host, port, password, width=None, height=None, clipboard=True):
+    def __init__(self, host, port, password, width=None, height=None, clipboard=True, edge=None):
         self.host = host
         self.port = port
         self.password = password
@@ -328,6 +328,7 @@ class Client:
             sys.exit("Could not detect screen size automatically; pass --width and --height.")
         self.width, self.height = size
         self.server_edge = "right"
+        self.expected_edge = edge  # which edge of THIS (client) screen the user expects borders the server
         self.conn = None
 
         self.clipboard = None
@@ -347,6 +348,11 @@ class Client:
         self.server_edge = reply.get("edge", "right")
         self.conn = conn
         print(f"[deskflop] connected to server {self.host}:{self.port}")
+        expected = "left" if self.server_edge == "right" else "right"
+        if self.expected_edge and self.expected_edge != expected:
+            print(f"[deskflop] WARNING: this client was started with --edge {self.expected_edge}, "
+                  f"but the server's config implies this client's bordering edge should be '{expected}' "
+                  f"-- double check the left/right script you ran on each machine")
 
     def run(self):
         if self.clipboard:
@@ -436,13 +442,17 @@ def main():
     cli.add_argument("--width", type=int, default=None, help="override auto-detected screen width")
     cli.add_argument("--height", type=int, default=None, help="override auto-detected screen height")
     cli.add_argument("--no-clipboard", action="store_true", help="disable clipboard sync")
+    cli.add_argument("--edge", choices=["left", "right"], default=None,
+                      help="which edge of THIS (client) screen borders the server; optional, "
+                           "only used to sanity-check against what the server reports")
 
     args = parser.parse_args()
 
     if args.mode == "server":
         Server(args.port, args.edge, args.password, args.width, args.height, not args.no_clipboard).run()
     else:
-        Client(args.host, args.port, args.password, args.width, args.height, not args.no_clipboard).run()
+        Client(args.host, args.port, args.password, args.width, args.height,
+               not args.no_clipboard, args.edge).run()
 
 
 if __name__ == "__main__":

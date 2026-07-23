@@ -26,11 +26,11 @@ to be arranged side-by-side (left/right), not stacked.
 
 ## Setup
 
-Requires Python 3.8+ on both machines.
-
-```bash
-pip install -r requirements.txt
-```
+Requires Python 3.8+ on both machines. Nothing else to install by hand:
+`deskflop.sh` / `deskflop.bat` create a local `.venv` next to themselves and
+install `requirements.txt` into it automatically the first time you run
+them. (If you invoke `deskflop.py` directly instead of the wrapper, you're
+responsible for `pip install -r requirements.txt` yourself.)
 
 Platform notes:
 - **Windows**: works out of the box.
@@ -71,6 +71,30 @@ Full option list: `./deskflop.sh server --help` / `./deskflop.sh client --help`
 (`--port`, `--width`/`--height` to override auto-detected screen size if
 detection fails on a headless/multi-monitor setup, `--no-clipboard` to
 disable clipboard syncing on that machine).
+
+### Convenience scripts
+
+`scripts/` has ready-made wrappers for each side of a left/right layout, on
+both platforms. Each is named for which of *its own* screen edges faces the
+other machine (not for where that machine physically sits on your desk), so
+the two machines you run always pair up as one `left` + one `right`:
+
+| This machine is...                          | Run (Linux/macOS)          | Run (Windows)               |
+|----------------------------------------------|-----------------------------|-------------------------------|
+| server, client is to my right (default)       | `scripts/server-right.sh`  | `scripts\server-right.bat`  |
+| server, client is to my left                  | `scripts/server-left.sh`   | `scripts\server-left.bat`   |
+| client, server is to my right                 | `scripts/client-right.sh`  | `scripts\client-right.bat`  |
+| client, server is to my left                  | `scripts/client-left.sh`   | `scripts\client-left.bat`   |
+
+e.g. for a server machine sitting physically on your left and a client
+sitting physically on your right: on the server, the client is to *its*
+right, so run `scripts/server-right.sh --password secret`; on the client,
+the server is to *its* left, so run
+`scripts/client-left.sh --host <server-ip> --password secret`. Any extra
+flags (`--password`, `--host`, `--port`, ...) are forwarded straight through
+to `deskflop.py`. If you pick a mismatched pair, the client prints a warning
+(it still works — the server's setting is authoritative — but it's a sign
+one of the scripts is wrong for the physical layout).
 
 ## Security
 
