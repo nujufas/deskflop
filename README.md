@@ -70,7 +70,8 @@ opposite edge.
 Full option list: `./deskflop.sh server --help` / `./deskflop.sh client --help`
 (`--port`, `--width`/`--height` to override auto-detected screen size if
 detection fails on a headless/multi-monitor setup, `--no-clipboard` to
-disable clipboard syncing on that machine).
+disable clipboard syncing on that machine, `--debug` for verbose per-event
+logging).
 
 ### Convenience scripts
 
@@ -95,6 +96,42 @@ flags (`--password`, `--host`, `--port`, ...) are forwarded straight through
 to `deskflop.py`. If you pick a mismatched pair, the client prints a warning
 (it still works — the server's setting is authoritative — but it's a sign
 one of the scripts is wrong for the physical layout).
+
+## Troubleshooting
+
+Both sides log every important lifecycle event by default (listening,
+connections, auth, edge hits, capture hand-off, disconnects). Add `--debug`
+on either side (or both) for a verbose trace of every mouse move, click,
+key, and network message -- this is the fastest way to see exactly where
+the chain breaks:
+
+- **Server never prints "edge hit..."**: the cursor isn't actually reaching
+  the coordinate deskflop thinks is the edge. Run the server with `--debug`
+  and watch the throttled `idle mouse at (x, y) ... edge_hit=...` lines
+  while you move the mouse -- compare the reported screen size against your
+  actual resolution. Multi-monitor Linux/X11 setups often report a combined
+  virtual screen size, so the "edge" may be far past where you're pushing;
+  pin it down with `--width`/`--height`.
+- **Server logs "edge hit... but no client is connected yet"**: the capture
+  side is working, but the two machines never completed the TCP handshake.
+  Check the server prints `client authenticated` when the client starts,
+  and that the client prints `connected to server ...`. If not, check the
+  port is open on the server's firewall and both sides use the same
+  `--password`.
+- **Server logs "control -> client" but nothing happens on the client**:
+  this means capture and the network hand-off both worked, but the client
+  isn't applying what it receives. Run the client with `--debug` and look
+  for `error handling message ...` -- prior to this fix, one bad message
+  (e.g. certain non-character keys, whose raw platform key codes aren't
+  portable between Linux and Windows) could silently kill the client's
+  entire receive loop, which looked exactly like "only the server's input
+  works." That path is now caught and logged instead of crashing; if you
+  still hit it, the logged traceback will show which key/message type is
+  unsupported.
+- **Nothing at all, not even startup logs**: on Linux, confirm you're in an
+  X11 (or XWayland) session, not plain Wayland -- pynput's global hooks
+  silently can't attach there. On macOS, check Accessibility / Input
+  Monitoring permissions for your terminal.
 
 ## Security
 
